@@ -1,0 +1,19 @@
+# HELP deploy_start_timestamp Unix timestamp of deployment start
+# TYPE deploy_start_timestamp gauge
+deploy_start_timestamp 1781622246
+
+# HELP deploy_info Deployment metadata
+# TYPE deploy_info gauge
+deploy_info{environment="development",strategy="local",branch="feature/test"} 1
+# HELP deploy_stage_success Deployment stage success
+# TYPE deploy_stage_success gauge
+deploy_stage_success 1
+# HELP deploy_duration_seconds Total deployment duration in seconds
+# TYPE deploy_duration_seconds gauge
+deploy_duration_seconds 0
+# HELP deploy_success_total Total successful deployments
+# TYPE deploy_success_total counter
+deploy_success_total 1
+# HELP deploy_failure_total Total failed deployments
+# TYPE deploy_failure_total counter
+deploy_failure_total 0
