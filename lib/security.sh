@@ -3,9 +3,6 @@ set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
-# ============================================================
-# Security Scanning & Artifact Signing (Senior: Supply Chain)
-# ============================================================
 
 security_scan_image() {
     local image="${1:-myapp:latest}"

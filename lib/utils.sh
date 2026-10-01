@@ -1,133 +1,61 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
-# ============================================================
-# Senior DevOps Deployment Toolkit — Utilities
-# ============================================================
-if [[ -n "${UTILS_SOURCED:-}" ]]; then return; fi
+if [[ -n ${UTILS_SOURCED:-} ]]; then return 0; fi
 UTILS_SOURCED=1
 
-if [[ -z "${SCRIPT_DIR:-}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -z ${SCRIPT_DIR:-} ]]; then
+    SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
     readonly SCRIPT_DIR
 fi
-readonly LOG_FILE="${SCRIPT_DIR}/logs/deploy.log"
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly CYAN='\033[0;36m'
-readonly BOLD='\033[1m'
-readonly NC='\033[0m'
+readonly LOG_FILE=${LOG_FILE:-${SCRIPT_DIR}/logs/deploy.log}
 
-ensure_log_dir() {
-    mkdir -p "$(dirname "$LOG_FILE")"
-}
+ensure_log_dir() { mkdir -p "$(dirname "$LOG_FILE")"; }
 
 log() {
-    local level="$1"
-    shift
-    local message="$*"
+    local level=$1; shift
+    local message=$*
     local timestamp
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    local color=""
-
-    case "$level" in
-        INFO)  color="$GREEN" ;;
-        WARN)  color="$YELLOW" ;;
-        ERROR) color="$RED" ;;
-        STEP)  color="$CYAN" ;;
-        *)     color="$NC" ;;
-    esac
-
-    # Console output with colors
-    echo -e "${color}[${timestamp}] ${level}: ${message}${NC}"
-
-    # File output plain text
+    timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     ensure_log_dir
-    echo "[${timestamp}] ${level}: ${message}" >> "$LOG_FILE"
+    printf '[%s] %s: %s\n' "$timestamp" "$level" "$message" | tee -a "$LOG_FILE" >&2
 }
 
-section() {
-    echo -e "\n${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    log STEP "$1"
-    echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-}
+section() { log STEP "$1"; }
+error_exit() { log ERROR "$1"; return 1; }
+is_dry_run() { [[ ${DRY_RUN:-false} == true ]]; }
+run_or_dry() { if is_dry_run; then log DRY-RUN "Would execute: $*"; else "$@"; fi; }
+backup_timestamp() { date -u +%Y%m%d_%H%M%S; }
+format_duration() { printf '%ss' "$(( $2 - $1 ))"; }
 
-error_exit() {
-    log ERROR "$1"
-    exit 1
-}
-
-confirm() {
-    local msg="$1"
-    read -r -p "$msg [y/N]: " response
-    case "$response" in
-        [yY][eE][sS]|[yY]) return 0 ;;
-        *) return 1 ;;
-    esac
-}
+valid_environment() { [[ $1 =~ ^(development|staging|production)$ ]]; }
+valid_strategy() { [[ $1 =~ ^(local|rolling|blue-green|canary)$ ]]; }
 
 load_env_config() {
-    local env_name="$1"
-    local config_file="${SCRIPT_DIR}/config/${env_name}.conf"
-
-    if [[ ! -f "$config_file" ]]; then
-        error_exit "Configuration file not found: $config_file"
-    fi
-
-    # Source config with safety checks
+    local env_name=$1
+    local config_file=${SCRIPT_DIR}/config/${env_name}.conf
+    valid_environment "$env_name" || { log ERROR "Unsupported environment: $env_name"; return 1; }
+    [[ -r $config_file ]] || { log ERROR "Configuration not readable: $config_file"; return 1; }
+    unset APP_DIR BRANCH SERVICE_NAME REPO_URL HEALTH_URL HEALTH_TIMEOUT HEALTH_INTERVAL DEPLOY_STRATEGY HOSTS VAULT_PATH DOCKER_IMAGE DOCKER_REGISTRY CANARY_START_WEIGHT CANARY_FINAL_WEIGHT CANARY_STEP CANARY_INTERVAL PROMETHEUS_PORT DISCORD_WEBHOOK SLACK_WEBHOOK
     while IFS='=' read -r key value; do
-        # Skip comments and empty lines
-        [[ "$key" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "$key" ]] && continue
-        # Trim whitespace
-        key=$(echo "$key" | xargs)
-        value=$(echo "$value" | xargs)
-        # Export variable
-        export "$key=$value"
+        [[ -z ${key//[[:space:]]/} || $key == \#* ]] && continue
+        key=${key//[[:space:]]/}
+        [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { log ERROR "Invalid configuration key: $key"; return 1; }
+        value=${value%$'\r'}
+        value=${value#"${value%%[![:space:]]*}"}; value=${value%"${value##*[![:space:]]}"}
+        printf -v "$key" '%s' "$value"
+        export "$key"
     done < "$config_file"
-
-    # Set defaults if not provided
-    export DEPLOY_STRATEGY="${DEPLOY_STRATEGY:-rolling}"
-    export HEALTH_URL="${HEALTH_URL:-http://localhost:8080/health}"
-    export HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
-    export HEALTH_INTERVAL="${HEALTH_INTERVAL:-2}"
-    export PROMETHEUS_PORT="${PROMETHEUS_PORT:-9100}"
-    export ARTIFACT_DIR="${SCRIPT_DIR}/releases"
-    export BACKUP_DIR="${SCRIPT_DIR}/backups"
-    export REPORT_DIR="${SCRIPT_DIR}/reports"
-
+    : "${APP_DIR:?APP_DIR is required}" "${SERVICE_NAME:?SERVICE_NAME is required}" "${BRANCH:?BRANCH is required}"
+    DEPLOY_STRATEGY=${DEPLOY_STRATEGY:-rolling}; valid_strategy "$DEPLOY_STRATEGY" || { log ERROR "Unsupported strategy: $DEPLOY_STRATEGY"; return 1; }
+    HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-30}; HEALTH_INTERVAL=${HEALTH_INTERVAL:-2}; HOSTS=${HOSTS:-localhost}
+    ARTIFACT_DIR=${ARTIFACT_DIR:-${SCRIPT_DIR}/releases}; BACKUP_DIR=${BACKUP_DIR:-${SCRIPT_DIR}/backups}; REPORT_DIR=${REPORT_DIR:-${SCRIPT_DIR}/reports}
+    export DEPLOY_STRATEGY HEALTH_TIMEOUT HEALTH_INTERVAL HOSTS ARTIFACT_DIR BACKUP_DIR REPORT_DIR
     mkdir -p "$ARTIFACT_DIR" "$BACKUP_DIR" "$REPORT_DIR"
 }
 
-is_dry_run() {
-    [[ "${DRY_RUN:-false}" == "true" ]]
-}
-
-dry_run_echo() {
-    if is_dry_run; then
-        echo -e "${YELLOW}[DRY-RUN] Would execute: $*${NC}"
-    else
-        echo "$@"
-    fi
-}
-
-run_or_dry() {
-    if is_dry_run; then
-        log WARN "[DRY-RUN] Would execute: $*"
-    else
-        "$@"
-    fi
-}
-
-backup_timestamp() {
-    date +%Y%m%d_%H%M%S
-}
-
-format_duration() {
-    local start=$1
-    local end=$2
-    local duration=$((end - start))
-    echo "${duration}s"
+require_commands() {
+    local missing=() command_name
+    for command_name in "$@"; do command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name"); done
+    ((${#missing[@]} == 0)) || { log ERROR "Missing required commands: ${missing[*]}"; return 1; }
 }

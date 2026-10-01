@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================
-# Automated Deployment System — Senior DevOps Edition
-# ============================================================
-# Supports: rolling, blue-green, canary, multi-host, Docker,
-#           Vault secrets, Prometheus metrics, Trivy scans,
-#           artifact signing, auto-rollback, ChatOps.
-# ============================================================
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly LIB_DIR="${SCRIPT_DIR}/lib"
@@ -19,7 +12,6 @@ source "${LIB_DIR}/vault.sh"
 source "${LIB_DIR}/security.sh"
 source "${LIB_DIR}/report.sh"
 
-# --- Globals ---
 ENV_NAME=""
 DEPLOY_STRATEGY_OVERRIDE=""
 DRY_RUN=false
@@ -32,7 +24,6 @@ START_TIME=0
 BACKUP_NAME=""
 ROLLBACK_TRIGGERED=false
 
-# --- Usage ---
 usage() {
     cat <<EOF
 Usage: $(basename "$0") <environment> [options]
@@ -55,7 +46,6 @@ EOF
     exit 1
 }
 
-# --- Argument Parsing ---
 parse_args() {
     if [[ $# -lt 1 ]]; then
         usage
@@ -78,7 +68,6 @@ parse_args() {
     done
 }
 
-# --- Pre-flight Checks ---
 preflight() {
     section "Pre-flight Checks"
 
@@ -97,16 +86,13 @@ preflight() {
     log INFO "Strategy: ${DEPLOY_STRATEGY}"
     log INFO "Dry Run: ${DRY_RUN}"
 
-    # Tooling checks
     command -v git &> /dev/null || error_exit "git is required"
     command -v curl &> /dev/null || log WARN "curl not found, health checks will be skipped"
     command -v rsync &> /dev/null || log WARN "rsync not found, falling back to cp"
 
-    # Vault connection (best-effort)
     vault_test_connection
 }
 
-# --- Stage 1: Git Pull ---
 stage_git() {
     section "Stage 1: Git Pull"
 
@@ -133,7 +119,6 @@ stage_git() {
     metric_set "deploy_git_commit_info" "1" "Git commit hash" "gauge"
 }
 
-# --- Stage 2: Backup ---
 stage_backup() {
     section "Stage 2: Backup"
     BACKUP_NAME="backup_$(backup_timestamp)_${ENV_NAME}"
@@ -150,13 +135,11 @@ stage_backup() {
     metric_set "deploy_backup_created" "1" "Backup created indicator" "gauge"
 }
 
-# --- Stage 3: Secrets ---
 stage_secrets() {
     section "Stage 3: Load Secrets"
     vault_fetch_secrets
 }
 
-# --- Stage 4: Build ---
 stage_build() {
     section "Stage 4: Build Application"
 
@@ -189,7 +172,6 @@ stage_build() {
     metric_set "deploy_build_success" "1" "Build success indicator" "gauge"
 }
 
-# --- Stage 5: Security Scan ---
 stage_security() {
     if [[ "$SKIP_SECURITY" == true ]]; then
         log WARN "Skipping security scan (user requested)"
@@ -205,7 +187,6 @@ stage_security() {
     fi
 }
 
-# --- Stage 6: Tests ---
 stage_tests() {
     if [[ "$SKIP_TESTS" == true ]]; then
         log WARN "Skipping tests (user requested)"
@@ -243,7 +224,6 @@ stage_tests() {
     metric_set "deploy_tests_passed" "1" "Tests passed indicator" "gauge"
 }
 
-# --- Stage 7: Artifact Packaging & Signing ---
 stage_artifact() {
     section "Stage 7: Artifact Packaging"
 
@@ -255,7 +235,6 @@ stage_artifact() {
         return 0
     fi
 
-    # Package the app directory (excluding node_modules, .git, venv)
     tar czf "$artifact_path" \
         --exclude='node_modules' \
         --exclude='.git' \
@@ -269,7 +248,6 @@ stage_artifact() {
     log INFO "Artifact: ${artifact_path}"
 }
 
-# --- Deployment Strategies ---
 strategy_local() {
     log INFO "Deploying locally to ${APP_DIR}"
     local build_dir="${APP_DIR}"
@@ -289,7 +267,6 @@ strategy_blue_green() {
     local active_dir=""
     local inactive_dir=""
 
-    # Determine which is active (simple symlink strategy)
     if [[ -L "$APP_DIR" ]]; then
         local current
         current=$(readlink -f "$APP_DIR")
@@ -301,7 +278,6 @@ strategy_blue_green() {
             inactive_dir="$blue_dir"
         fi
     else
-        # First deployment
         active_dir="$blue_dir"
         inactive_dir="$green_dir"
         run_or_dry mkdir -p "$blue_dir" "$green_dir"
@@ -313,10 +289,8 @@ strategy_blue_green() {
 
     log INFO "Active: ${active_dir}, Deploying to: ${inactive_dir}"
 
-    # Deploy to inactive
     run_or_dry rsync -a --delete "${APP_DIR}/" "${inactive_dir}/" || run_or_dry cp -a "${APP_DIR}/." "${inactive_dir}/"
 
-    # Swap symlink
     run_or_dry ln -sfn "$inactive_dir" "$APP_DIR"
     log INFO "Traffic switched to ${inactive_dir}"
 }
@@ -332,7 +306,6 @@ strategy_canary() {
 
     for ((w=start_weight; w<=final_weight; w+=step)); do
         log INFO "Canary: Shifting ${w}% traffic to new version"
-        # In real world: update nginx upstream, envoy route, k8s weight, etc.
         sleep "$interval"
 
         if ! health_check_internal; then
@@ -346,7 +319,6 @@ strategy_canary() {
 
 strategy_rolling() {
     log INFO "Executing Rolling deployment"
-    # For local rolling, this is identical to local
     strategy_local
 }
 
@@ -367,7 +339,6 @@ deploy_to_host() {
             *)          strategy_local ;;
         esac
     else
-        # Remote deployment stub via SSH
         log INFO "Deploying via SSH to ${host}..."
         ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$host" \
             "echo 'Remote deployment executed on ${host}'" || log WARN "SSH to ${host} failed (stub)"
@@ -407,7 +378,6 @@ stage_deploy() {
     metric_set "deploy_stage_success" "1" "Deployment stage success" "gauge"
 }
 
-# --- Stage 8: Restart Service ---
 stage_restart() {
     section "Stage 8: Restart Service"
 
@@ -427,7 +397,6 @@ stage_restart() {
     fi
 }
 
-# --- Stage 9: Health Check ---
 health_check_internal() {
     if [[ -z "${HEALTH_URL:-}" ]]; then
         log WARN "HEALTH_URL not set. Skipping health check."
@@ -478,7 +447,6 @@ stage_health_check() {
     fi
 }
 
-# --- Stage 10: Auto-Rollback ---
 stage_rollback() {
     section "ROLLBACK INITIATED"
     log ERROR "Rolling back to backup: ${BACKUP_NAME}"
@@ -496,11 +464,9 @@ stage_rollback() {
         return 1
     fi
 
-    # Restore backup
     rm -rf "${APP_DIR:?}"/*
     cp -a "${backup_path}/." "$APP_DIR/"
 
-    # Restart service
     if command -v systemctl &> /dev/null; then
         systemctl restart "$SERVICE_NAME" || true
     elif command -v docker &> /dev/null; then
@@ -511,7 +477,6 @@ stage_rollback() {
     metric_set "deploy_rollback_executed" "1" "Rollback executed indicator" "gauge"
 }
 
-# --- Finalize ---
 finalize() {
     local end_time
     end_time=$(date +%s)
@@ -531,13 +496,11 @@ finalize() {
     fi
 }
 
-# --- Cleanup on exit ---
 cleanup() {
     metrics_cleanup
 }
 trap cleanup EXIT
 
-# --- Main ---
 main() {
     parse_args "$@"
     preflight

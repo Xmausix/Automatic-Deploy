@@ -1,62 +1,25 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
+set -Eeuo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
-# ============================================================
-# Notifications: Discord & Slack (Senior: ChatOps)
-# ============================================================
-
 send_discord() {
-    local message="$1"
-    local webhook="${DISCORD_WEBHOOK:-}"
-
-    if [[ -z "$webhook" ]]; then
-        log WARN "Discord webhook not configured. Skipping notification."
-        return 0
-    fi
-
-    if is_dry_run; then
-        log WARN "[DRY-RUN] Would send Discord: $message"
-        return 0
-    fi
-
-    curl -s -H "Content-Type: application/json" \
-         -d "{\"content\":\"$message\"}" \
-         "$webhook" > /dev/null || log WARN "Discord notification failed"
-
-    log INFO "Discord notification sent"
+    local message=$1 webhook=${DISCORD_WEBHOOK:-}
+    [[ -n $webhook ]] || return 0
+    is_dry_run && { log DRY-RUN "Would notify Discord"; return 0; }
+    command -v curl >/dev/null 2>&1 || { log WARN "curl unavailable; Discord notification skipped"; return 0; }
+    local payload
+    if command -v jq >/dev/null 2>&1; then payload=$(jq -cn --arg content "$message" '{content:$content}'); else payload=$(printf '{"content":"%s"}' "${message//\/\\}"); fi
+    curl --fail --silent --show-error --max-time 10 -H 'Content-Type: application/json' --data "$payload" "$webhook" >/dev/null || log WARN "Discord notification failed"
 }
 
 send_slack() {
-    local message="$1"
-    local status="${2:-info}"
-    local webhook="${SLACK_WEBHOOK:-}"
-
-    if [[ -z "$webhook" ]]; then
-        log WARN "Slack webhook not configured. Skipping notification."
-        return 0
-    fi
-
-    local color="#36a64f"
-    [[ "$status" == "error" ]] && color="#ff0000"
-    [[ "$status" == "warn" ]] && color="#ff9900"
-
-    if is_dry_run; then
-        log WARN "[DRY-RUN] Would send Slack: $message"
-        return 0
-    fi
-
-    curl -s -H "Content-Type: application/json" \
-         -d "{\"attachments\":[{\"color\":\"$color\",\"text\":\"$message\"}]}" \
-         "$webhook" > /dev/null || log WARN "Slack notification failed"
-
-    log INFO "Slack notification sent"
+    local message=$1 level=${2:-info} webhook=${SLACK_WEBHOOK:-}
+    [[ -n $webhook ]] || return 0
+    is_dry_run && { log DRY-RUN "Would notify Slack"; return 0; }
+    command -v curl >/dev/null 2>&1 || { log WARN "curl unavailable; Slack notification skipped"; return 0; }
+    local payload
+    if command -v jq >/dev/null 2>&1; then payload=$(jq -cn --arg text "[$level] $message" '{text:$text}'); else payload=$(printf '{"text":"[%s] %s"}' "$level" "${message//\/\\}"); fi
+    curl --fail --silent --show-error --max-time 10 -H 'Content-Type: application/json' --data "$payload" "$webhook" >/dev/null || log WARN "Slack notification failed"
 }
 
-notify() {
-    local level="$1"
-    local msg="$2"
-    send_discord "[$level] $msg"
-    send_slack "[$level] $msg" "$level"
-}
+notify() { local level=$1 message=$2; send_discord "[$level] $message"; send_slack "$message" "$level"; }

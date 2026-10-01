@@ -3,9 +3,6 @@ set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
-# ============================================================
-# Prometheus Metrics Exporter (Senior: Observability)
-# ============================================================
 
 METRICS_FILE=""
 
@@ -13,12 +10,8 @@ metrics_init() {
     local deploy_id="$1"
     METRICS_FILE="${SCRIPT_DIR}/logs/metrics_${deploy_id}.prom"
     cat > "$METRICS_FILE" <<EOF
-# HELP deploy_start_timestamp Unix timestamp of deployment start
-# TYPE deploy_start_timestamp gauge
 deploy_start_timestamp $(date +%s)
 
-# HELP deploy_info Deployment metadata
-# TYPE deploy_info gauge
 deploy_info{environment="${ENV_NAME}",strategy="${DEPLOY_STRATEGY}",branch="${BRANCH:-unknown}"} 1
 EOF
 }
@@ -50,9 +43,7 @@ metrics_finalize() {
     metric_set "deploy_success_total" "$success" "Total successful deployments" "counter"
     metric_set "deploy_failure_total" "$((1 - success))" "Total failed deployments" "counter"
 
-    # Expose via simple HTTP if requested (nc trick or python http.server)
     if [[ -n "${PROMETHEUS_PORT:-}" ]] && command -v python3 &> /dev/null && ! is_dry_run; then
-        # Serve metrics file on background port (optional, for demo)
         (
             cd "$(dirname "$METRICS_FILE")"
             python3 -m http.server "$PROMETHEUS_PORT" --bind 127.0.0.1 &

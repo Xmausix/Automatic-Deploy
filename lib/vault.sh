@@ -3,9 +3,6 @@ set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
-# ============================================================
-# HashiCorp Vault Integration (Senior: Secrets Management)
-# ============================================================
 
 vault_fetch_secrets() {
     local path="${VAULT_PATH:-}"
@@ -26,10 +23,8 @@ vault_fetch_secrets() {
         return 0
     fi
 
-    # Attempt to source secrets into environment
     local vault_json
     if vault_json=$(vault kv get -format=json "$path" 2>/dev/null); then
-        # Extract keys and export (this is a simplified parser)
         while IFS= read -r key; do
             local val
             val=$(echo "$vault_json" | jq -r ".data.data.${key}")

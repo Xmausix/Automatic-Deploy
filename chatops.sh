@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================
-# ChatOps Webhook Server (Senior: ChatOps Integration)
-# ============================================================
-# This script can be used as a simple webhook receiver or curl target
-# to trigger deployments from Slack/Discord/Mattermost.
-# Usage example:
-#   ./chatops.sh deploy production
-#   curl -X POST http://localhost:9000/deploy -d '{"env":"production"}'
-# ============================================================
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/utils.sh"
@@ -60,7 +51,6 @@ server_mode() {
     log INFO "Starting ChatOps webhook server on port ${port}"
     log WARN "This is a demo stub. In production use a proper webhook listener or a bot."
 
-    # Example: listen with netcat (very simple, not for production)
     while true; do
         {
             read -r method path _
@@ -85,7 +75,6 @@ server_mode() {
     done
 }
 
-# --- Main dispatcher ---
 case "$command" in
     deploy)
         handle_deploy "$@"

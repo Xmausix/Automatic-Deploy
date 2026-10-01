@@ -3,9 +3,6 @@ set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
-# ============================================================
-# Deployment Report Generator (Senior: Audit & Compliance)
-# ============================================================
 
 generate_report() {
     local deploy_id="$1"
@@ -20,7 +17,6 @@ generate_report() {
     log INFO "Generating deployment report: $report_file"
 
     cat > "$report_file" <<EOF
-# Deployment Report
 
 | Property         | Value                          |
 |------------------|--------------------------------|
@@ -33,7 +29,6 @@ generate_report() {
 | Backup           | \`${backup_name}\`              |
 | Timestamp        | $(date '+%Y-%m-%d %H:%M:%S') |
 
-## Logs
 
 \`\`\`
 $(tail -n 50 "$LOG_FILE")
@@ -45,7 +40,6 @@ EOF
 
     log INFO "Report saved: $report_file"
 
-    # Optional PDF conversion if pandoc available
     if command -v pandoc &> /dev/null && command -v wkhtmltopdf &> /dev/null; then
         pandoc "$report_file" -o "${report_file%.md}.pdf" --pdf-engine=wkhtmltopdf 2>/dev/null || true
         log INFO "PDF report generated: ${report_file%.md}.pdf"

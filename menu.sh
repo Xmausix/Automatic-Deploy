@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================
-# TUI Deployment Manager (Senior: Interactive UX)
-# ============================================================
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Prefer dialog, fallback to whiptail, fallback to plain text
 if command -v dialog &> /dev/null; then
     TUI=dialog
 elif command -v whiptail &> /dev/null; then
@@ -121,7 +117,6 @@ run_choice() {
     esac
 }
 
-# Main loop
 clear
 while true; do
     run_choice
